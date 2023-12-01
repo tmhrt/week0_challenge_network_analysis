@@ -1,39 +1,15 @@
-import os
-import sys
-import glob
+import os,re
 import json
 import datetime
 from collections import Counter
-from collections import Counter
-
-import pandas as pd
 from matplotlib import pyplot as plt
-import seaborn as sns
+import pandas as pd
 from nltk.corpus import stopwords
 
+def get_tagged_users(df):
+    """get all @ in the messages"""
 
-def break_combined_weeks(combined_weeks):
-    """
-    Breaks combined weeks into separate weeks.
-    
-    Args:
-        combined_weeks: list of tuples of weeks to combine
-        
-    Returns:
-        tuple of lists of weeks to be treated as plus one and minus one
-    """
-    plus_one_week = []
-    minus_one_week = []
-
-    for week in combined_weeks:
-        if week[0] < week[1]:
-            plus_one_week.append(week[0])
-            minus_one_week.append(week[1])
-        else:
-            minus_one_week.append(week[0])
-            plus_one_week.append(week[1])
-
-    return plus_one_week, minus_one_week
+    return df['msg_content'].map(lambda x: re.findall(r'@U\w+', x))
 
 def get_msgs_df_info(df):
     msgs_count_dict = df.user.value_counts().to_dict()
@@ -41,8 +17,6 @@ def get_msgs_df_info(df):
     mentions_count_dict = dict(Counter([u for m in df.mentions if m != None for u in m]))
     links_count_dict = df.groupby("user").link_count.sum().to_dict()
     return msgs_count_dict, replies_count_dict, mentions_count_dict, links_count_dict
-
-
 
 def get_messages_dict(msgs):
     msg_list = {
@@ -59,8 +33,7 @@ def get_messages_dict(msgs):
             "links":[],
             "link_count":[]
             }
-
-
+    
     for msg in msgs:
         if "subtype" not in msg:
             try:
@@ -123,6 +96,92 @@ def get_messages_dict(msgs):
     
     return msg_list
 
+def get_messages_from_channel(channel_path):
+    '''
+    get all the messages from a channel        
+    '''
+    channel_json_files = os.listdir(channel_path)
+    channel_msgs = [json.load(open(channel_path + "/" + f)) for f in channel_json_files]
+
+    df = pd.concat([pd.DataFrame(get_messages_dict(msgs)) for msgs in channel_msgs])
+    print(f"Number of messages in channel: {len(df)}")
+    
+    return df
+
+def convert_2_timestamp(column, data): # type: ignore
+    """convert from unix time to readable timestamp
+        args: column: columns that needs to be converted to timestamp
+                data: data that has the specified column
+    """
+    if column in data.columns.values:
+        timestamp_ = []
+        for time_unix in data[column]:
+            if time_unix == 0:
+                timestamp_.append(0)
+            else:
+                a = datetime.datetime.fromtimestamp(float(time_unix))
+                timestamp_.append(a.strftime('%Y-%m-%d %H:%M:%S'))
+        return timestamp_
+    else: 
+        print(f"{column} not in data")
+
+    
+def map_userid_2_realname(user_profile: dict, comm_dict: dict, plot=False):
+    """
+    map slack_id to realnames
+    user_profile: a dictionary that contains users info such as real_names
+    comm_dict: a dictionary that contains slack_id and total_message sent by that slack_id
+    """
+    user_dict = {} # to store the id
+    real_name = [] # to store the real name
+    ac_comm_dict = {} # to store the mapping
+    count = 0
+    # collect all the real names
+    for i in range(len(user_profile['profile'])):
+        real_name.append(dict(user_profile['profile'])[i]['real_name'])
+
+    # loop the slack ids
+    for i in user_profile['id']:
+        user_dict[i] = real_name[count]
+        count += 1
+
+    # to store mapping
+    for i in comm_dict:
+        if i in user_dict:
+            ac_comm_dict[user_dict[i]] = comm_dict[i]
+
+    ac_comm_dict = pd.DataFrame(data= zip(ac_comm_dict.keys(), ac_comm_dict.values()),
+    columns=['LearnerName', '# of Msg sent in Threads']).sort_values(by='# of Msg sent in Threads', ascending=False)
+    
+    if plot:
+        ac_comm_dict.plot.bar(figsize=(15, 7.5), x='LearnerName', y='# of Msg sent in Threads')
+        plt.title('Student based on Message sent in thread', size=20)
+        
+    return ac_comm_dict
+
+def break_combined_weeks(combined_weeks):
+    """
+    Breaks combined weeks into separate weeks.
+    
+    Args:
+        combined_weeks: list of tuples of weeks to combine
+        
+    Returns:
+        tuple of lists of weeks to be treated as plus one and minus one
+    """
+    plus_one_week = []
+    minus_one_week = []
+
+    for week in combined_weeks:
+        if week[0] < week[1]:
+            plus_one_week.append(week[0])
+            minus_one_week.append(week[1])
+        else:
+            minus_one_week.append(week[0])
+            plus_one_week.append(week[1])
+
+    return plus_one_week, minus_one_week
+
 def from_msg_get_replies(msg):
     replies = []
     if "thread_ts" in msg and "replies" in msg:
@@ -144,39 +203,9 @@ def process_msgs(msg):
     '''
     select important columns from the message
     '''
-
     keys = ["client_msg_id", "type", "text", "user", "ts", "team", 
             "thread_ts", "reply_count", "reply_users_count"]
     msg_list = {k:msg[k] for k in keys}
     rply_list = from_msg_get_replies(msg)
 
     return msg_list, rply_list
-
-def get_messages_from_channel(channel_path):
-    '''
-    get all the messages from a channel        
-    '''
-    channel_json_files = os.listdir(channel_path)
-    channel_msgs = [json.load(open(channel_path + "/" + f)) for f in channel_json_files]
-
-    df = pd.concat([pd.DataFrame(get_messages_dict(msgs)) for msgs in channel_msgs])
-    print(f"Number of messages in channel: {len(df)}")
-    
-    return df
-
-
-def convert_2_timestamp(column, data):
-    """convert from unix time to readable timestamp
-        args: column: columns that needs to be converted to timestamp
-                data: data that has the specified column
-    """
-    if column in data.columns.values:
-        timestamp_ = []
-        for time_unix in data[column]:
-            if time_unix == 0:
-                timestamp_.append(0)
-            else:
-                a = datetime.datetime.fromtimestamp(float(time_unix))
-                timestamp_.append(a.strftime('%Y-%m-%d %H:%M:%S'))
-        return timestamp_
-    else: print(f"{column} not in data")
