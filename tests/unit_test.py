@@ -1,3 +1,4 @@
+from defusedxml import DTDForbidden
 import pandas as pd
 
 
@@ -7,9 +8,9 @@ def setUpModule():
 
 
 class TestData():
-    @dt.mandatory
+    @DTDForbidden.mandatory # type: ignore
     def test_columns(self):
-        self.assertValid(
+        self.assertValid( # type: ignore
             df.columns,
             {'title', 'rating', 'year', 'runtime'},
         )
